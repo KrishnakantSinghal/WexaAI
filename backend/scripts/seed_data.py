@@ -137,6 +137,18 @@ async def seed() -> None:
                 await db.flush()
             print(f"  Inserted {total} events across 15 days")
 
+        # idempotency guard: skip saved queries / dashboard / widgets if already seeded
+        existing_sq = (
+            await db.execute(
+                select(SavedQuery).where(SavedQuery.organization_id == org.id).limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing_sq:
+            await db.commit()
+            print("  Saved queries / dashboard already exist — skipping.")
+            print("Done.")
+            return
+
         # 4. saved queries
         sq_pageviews = SavedQuery(
             organization_id=org.id,
