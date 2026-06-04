@@ -5,6 +5,14 @@ from typing import List, Optional
 
 from fastapi import APIRouter, File, Header, Request, UploadFile, status
 
+from app.core.cache import (
+    cache_delete,
+    cache_delete_prefix,
+    cache_get_json,
+    cache_set_json,
+    hash_payload,
+    make_key,
+)
 from app.core.dependencies import CurrentOrgID, CurrentUserID, DBSession
 from app.core.exceptions import AuthenticationError, NotFoundError
 from app.schemas.common import MessageResponse
@@ -37,6 +45,8 @@ async def ingest_single_event(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+    await cache_delete(make_key("en", org_id))
+    await cache_delete_prefix(make_key("eq", org_id, ""))
     return {"id": str(event.id), "status": "accepted"}
 
 
@@ -55,6 +65,8 @@ async def ingest_batch_events(
         ip_address=request.client.host if request.client else None,
         user_agent=request.headers.get("user-agent"),
     )
+    await cache_delete(make_key("en", org_id))
+    await cache_delete_prefix(make_key("eq", org_id, ""))
     return {"ingested": count, "status": "accepted"}
 
 
@@ -71,6 +83,8 @@ async def ingest_csv(
         raise ValidationError("File must be a CSV")
     service = EventService(db)
     count = await service.ingest_csv(org_id=uuid.UUID(org_id), file=file)
+    await cache_delete(make_key("en", org_id))
+    await cache_delete_prefix(make_key("eq", org_id, ""))
     return {"ingested": count, "status": "accepted"}
 
 
@@ -81,14 +95,31 @@ async def query_events(
     user_id: CurrentUserID,
     db: DBSession,
 ):
+    cache_key = make_key("eq", org_id, hash_payload(data.model_dump(mode="json")))
+    cached = await cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
     service = EventService(db)
-    return await service.query_events(org_id=uuid.UUID(org_id), query=data)
+    result = await service.query_events(org_id=uuid.UUID(org_id), query=data)
+    payload = (
+        result.model_dump(mode="json") if hasattr(result, "model_dump") else result
+    )
+    await cache_set_json(cache_key, payload, ttl=30)
+    return payload
 
 
 @router.get("/names", response_model=List[str])
 async def get_event_names(org_id: CurrentOrgID, user_id: CurrentUserID, db: DBSession):
+    cache_key = make_key("en", org_id)
+    cached = await cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
     service = EventService(db)
-    return await service.get_event_names(org_id=uuid.UUID(org_id))
+    names = await service.get_event_names(org_id=uuid.UUID(org_id))
+    await cache_set_json(cache_key, names, ttl=120)
+    return names
 
 
 # --- Event Sources ---

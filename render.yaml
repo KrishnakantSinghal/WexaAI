@@ -8,7 +8,7 @@
 
 databases:
   - name: wexaai-postgres
-    plan: free            # bump to "starter" or higher for production
+    plan: free # bump to "starter" or higher for production
     databaseName: wexaai
     user: wexaai
     postgresMajorVersion: "16"
@@ -17,15 +17,15 @@ services:
   # ── Redis (Render KeyValue) ───────────────────────────────────────────────
   - type: keyvalue
     name: wexaai-redis
-    plan: free            # 25 MB; use "starter" or higher for production
+    plan: free # 25 MB; use "starter" or higher for production
     region: oregon
-    ipAllowList: []       # internal access only
+    ipAllowList: [] # internal access only
 
   # ── API (FastAPI / Uvicorn) ───────────────────────────────────────────────
   - type: web
     name: wexaai-api
     runtime: docker
-    plan: starter          # web services have no free tier with custom Docker
+    plan: starter # web services have no free tier with custom Docker
     region: oregon
     rootDir: backend
     dockerfilePath: ./Dockerfile
@@ -72,9 +72,9 @@ services:
           name: wexaai-redis
           property: connectionString
       - key: ALLOWED_ORIGINS
-        sync: false        # set in Render UI: https://your-app.vercel.app
+        sync: false # set in Render UI: https://your-app.vercel.app
       - key: FRONTEND_URL
-        sync: false        # set in Render UI
+        sync: false # set in Render UI
       - key: SMTP_HOST
         value: smtp.gmail.com
       - key: SMTP_PORT

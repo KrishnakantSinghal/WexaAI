@@ -37,19 +37,19 @@ import { cn } from "@/lib/utils";
 
 const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4"];
 
-function WidgetCard({ widget }: { widget: Widget }) {
+type SavedQuery = { id: string; query_config: Record<string, unknown> };
+
+function WidgetCard({
+  widget,
+  savedQuery,
+}: {
+  widget: Widget;
+  savedQuery: SavedQuery | undefined;
+}) {
   const { data: queryData, isLoading } = useQuery({
     queryKey: ["widget-data", widget.id, widget.saved_query_id],
     queryFn: async () => {
-      if (!widget.saved_query_id) return null;
-      // Get the saved query to know what to query
-      const qRes = await api.get(`/dashboards/queries/saved`);
-      const queries = qRes.data as Array<{
-        id: string;
-        query_config: Record<string, unknown>;
-      }>;
-      const savedQuery = queries.find((q) => q.id === widget.saved_query_id);
-      if (!savedQuery) return null;
+      if (!widget.saved_query_id || !savedQuery) return null;
 
       // --- translate seeded query_config -> backend EventQueryRequest ---
       const cfg = savedQuery.query_config || {};
@@ -107,8 +107,9 @@ function WidgetCard({ widget }: { widget: Widget }) {
         total: number;
       };
     },
-    enabled: !!widget.saved_query_id,
-    refetchInterval: 30000,
+    enabled: !!widget.saved_query_id && !!savedQuery,
+    refetchInterval: 60_000,
+    staleTime: 30_000,
   });
 
   if (isLoading) {
@@ -212,7 +213,22 @@ export default function DashboardDetailPage() {
       return res.data;
     },
     enabled: !!id,
+    staleTime: 60_000,
   });
+
+  // Fetch saved queries ONCE for all widgets — avoids N duplicate calls.
+  const { data: savedQueries } = useQuery({
+    queryKey: ["saved-queries"],
+    queryFn: async (): Promise<SavedQuery[]> => {
+      const res = await api.get("/dashboards/queries/saved");
+      return res.data;
+    },
+    enabled: !!dashboard?.widgets?.length,
+    staleTime: 5 * 60_000,
+  });
+  const savedQueryMap = new Map<string, SavedQuery>(
+    (savedQueries ?? []).map((q) => [q.id, q])
+  );
 
   // Real-time updates via WebSocket
   const { status: wsStatus } = useWebSocket({
@@ -338,7 +354,14 @@ export default function DashboardDetailPage() {
                   {widget.title}
                 </p>
                 <div className="h-[calc(100%-2rem)]">
-                  <WidgetCard widget={widget} />
+                  <WidgetCard
+                    widget={widget}
+                    savedQuery={
+                      widget.saved_query_id
+                        ? savedQueryMap.get(widget.saved_query_id)
+                        : undefined
+                    }
+                  />
                 </div>
               </div>
             );

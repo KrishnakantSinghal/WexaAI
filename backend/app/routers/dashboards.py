@@ -5,6 +5,12 @@ from typing import List
 
 from fastapi import APIRouter, status
 
+from app.core.cache import (
+    cache_delete,
+    cache_get_json,
+    cache_set_json,
+    make_key,
+)
 from app.core.dependencies import CurrentOrgID, CurrentUserID, DBSession
 from app.schemas.common import MessageResponse
 from app.schemas.dashboard import (
@@ -149,7 +155,11 @@ async def create_saved_query(
     db: DBSession,
 ):
     service = DashboardService(db)
-    return await service.create_saved_query(uuid.UUID(org_id), uuid.UUID(user_id), data)
+    result = await service.create_saved_query(
+        uuid.UUID(org_id), uuid.UUID(user_id), data
+    )
+    await cache_delete(make_key("sq", org_id))
+    return result
 
 
 @router.get("/queries/saved", response_model=List[SavedQueryResponse])
@@ -158,7 +168,17 @@ async def list_saved_queries(
 ):
     from app.repositories.dashboard_repository import SavedQueryRepository
 
+    cache_key = make_key("sq", org_id)
+    cached = await cache_get_json(cache_key)
+    if cached is not None:
+        return cached
+
     service = DashboardService(db)
     await service._check_member(uuid.UUID(org_id), uuid.UUID(user_id), "viewer")
     repo = SavedQueryRepository(db)
-    return await repo.get_org_queries(uuid.UUID(org_id))
+    rows = await repo.get_org_queries(uuid.UUID(org_id))
+    payload = [
+        SavedQueryResponse.model_validate(r).model_dump(mode="json") for r in rows
+    ]
+    await cache_set_json(cache_key, payload, ttl=300)
+    return payload
