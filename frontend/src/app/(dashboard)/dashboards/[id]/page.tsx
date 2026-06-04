@@ -1,0 +1,282 @@
+"use client";
+
+import { useState, useCallback } from "react";
+import { useParams } from "next/navigation";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import {
+  Plus,
+  RefreshCw,
+  Maximize2,
+  Settings,
+  ArrowLeft,
+  Loader2,
+} from "lucide-react";
+import Link from "next/link";
+import {
+  LineChart,
+  Line,
+  BarChart,
+  Bar,
+  PieChart,
+  Pie,
+  Cell,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import api from "@/lib/api";
+import { queryClient } from "@/lib/queryClient";
+import { useWebSocket } from "@/hooks/useWebSocket";
+import { useDashboardStore } from "@/store/dashboardStore";
+import { useAuthStore } from "@/store/authStore";
+import type { Dashboard, Widget } from "@/types";
+import { cn } from "@/lib/utils";
+
+const COLORS = ["#3B82F6", "#10B981", "#F59E0B", "#EF4444", "#8B5CF6", "#06B6D4"];
+
+function WidgetCard({ widget }: { widget: Widget }) {
+  const { data: queryData, isLoading } = useQuery({
+    queryKey: ["widget-data", widget.id, widget.saved_query_id],
+    queryFn: async () => {
+      if (!widget.saved_query_id) return null;
+      // Get the saved query to know what to query
+      const qRes = await api.get(`/dashboards/queries/saved`);
+      const queries = qRes.data as Array<{ id: string; query_config: Record<string, unknown> }>;
+      const savedQuery = queries.find((q) => q.id === widget.saved_query_id);
+      if (!savedQuery) return null;
+
+      const endTime = new Date().toISOString();
+      const startTime = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
+      const res = await api.post("/events/query", {
+        ...savedQuery.query_config,
+        start_time: startTime,
+        end_time: endTime,
+      });
+      return res.data as { data: Array<{ bucket: string; value: number }>; total: number };
+    },
+    enabled: !!widget.saved_query_id,
+    refetchInterval: 30000,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  const chartData = queryData?.data ?? [];
+
+  switch (widget.widget_type) {
+    case "kpi_card":
+      return (
+        <div className="flex flex-col items-center justify-center h-full">
+          <p className="text-4xl font-bold text-gray-900">
+            {queryData?.total ?? 0}
+          </p>
+          <p className="text-sm text-gray-500 mt-1">{widget.title}</p>
+        </div>
+      );
+
+    case "line_chart":
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} />
+            <Tooltip />
+            <Line type="monotone" dataKey="value" stroke="#3B82F6" strokeWidth={2} dot={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      );
+
+    case "bar_chart":
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
+            <XAxis dataKey="bucket" tick={{ fontSize: 11 }} />
+            <YAxis tick={{ fontSize: 11 }} />
+            <Tooltip />
+            <Bar dataKey="value" fill="#3B82F6" radius={[4, 4, 0, 0]} />
+          </BarChart>
+        </ResponsiveContainer>
+      );
+
+    case "pie_chart":
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie data={chartData} dataKey="value" nameKey="bucket" cx="50%" cy="50%">
+              {chartData.map((_, i) => (
+                <Cell key={i} fill={COLORS[i % COLORS.length]} />
+              ))}
+            </Pie>
+            <Tooltip />
+            <Legend />
+          </PieChart>
+        </ResponsiveContainer>
+      );
+
+    case "table":
+      return (
+        <div className="overflow-auto h-full">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-gray-200">
+                <th className="text-left p-2 font-medium text-gray-500">Time</th>
+                <th className="text-right p-2 font-medium text-gray-500">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chartData.map((row, i) => (
+                <tr key={i} className="border-b border-gray-100">
+                  <td className="p-2 text-gray-700">{row.bucket}</td>
+                  <td className="p-2 text-right font-mono">{row.value}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+
+    default:
+      return <div className="text-gray-400 text-sm">Unknown widget type</div>;
+  }
+}
+
+export default function DashboardDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const { isFullscreen, setFullscreen } = useDashboardStore();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+
+  const { data: dashboard, isLoading, refetch } = useQuery({
+    queryKey: ["dashboard", id],
+    queryFn: async (): Promise<Dashboard> => {
+      const res = await api.get(`/dashboards/${id}`);
+      return res.data;
+    },
+    enabled: !!id,
+  });
+
+  // Real-time updates via WebSocket
+  const { status: wsStatus } = useWebSocket({
+    path: `/ws/dashboard/${id}`,
+    enabled: isAuthenticated && !!id,
+    onMessage: useCallback(
+      (msg: unknown) => {
+        const data = msg as { type?: string };
+        if (data?.type === "data_updated") {
+          refetch();
+        }
+      },
+      [refetch]
+    ),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!dashboard) {
+    return (
+      <div className="p-8 text-center text-gray-500">
+        <p>Dashboard not found.</p>
+        <Link href="/dashboards" className="text-primary hover:underline mt-2 inline-block">
+          Back to dashboards
+        </Link>
+      </div>
+    );
+  }
+
+  return (
+    <div className={cn("p-8", isFullscreen && "fixed inset-0 bg-white z-50 overflow-auto")}>
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-3">
+          {!isFullscreen && (
+            <Link
+              href="/dashboards"
+              className="text-gray-400 hover:text-gray-600 transition-colors"
+            >
+              <ArrowLeft className="w-5 h-5" />
+            </Link>
+          )}
+          <div>
+            <h1 className="text-2xl font-bold text-gray-900">{dashboard.name}</h1>
+            {dashboard.description && (
+              <p className="text-gray-500 text-sm mt-0.5">{dashboard.description}</p>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div
+            className={cn(
+              "w-2 h-2 rounded-full",
+              wsStatus === "connected" ? "bg-green-500" : "bg-gray-300"
+            )}
+            title={`WebSocket: ${wsStatus}`}
+          />
+          <button
+            onClick={() => refetch()}
+            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+          >
+            <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setFullscreen(!isFullscreen)}
+            className="p-2 text-gray-400 hover:text-gray-600 rounded-lg hover:bg-gray-100"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      {/* Widgets Grid */}
+      {!dashboard.widgets || dashboard.widgets.length === 0 ? (
+        <div className="text-center py-24 text-gray-400">
+          <Settings className="w-12 h-12 mx-auto mb-4 opacity-30" />
+          <p className="text-lg font-medium">No widgets yet</p>
+          <p className="text-sm">Add widgets to start visualizing your data</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-12 gap-4">
+          {dashboard.widgets.map((widget) => {
+            const pos = widget.position as {
+              x: number;
+              y: number;
+              w: number;
+              h: number;
+            };
+            return (
+              <div
+                key={widget.id}
+                className={cn(
+                  "bg-white rounded-xl border border-gray-200 p-4",
+                  `col-span-${Math.min(pos.w, 12)}`
+                )}
+                style={{ minHeight: `${pos.h * 80}px` }}
+              >
+                <p className="text-sm font-medium text-gray-700 mb-3">
+                  {widget.title}
+                </p>
+                <div className="h-[calc(100%-2rem)]">
+                  <WidgetCard widget={widget} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
