@@ -44,18 +44,68 @@ function WidgetCard({ widget }: { widget: Widget }) {
       if (!widget.saved_query_id) return null;
       // Get the saved query to know what to query
       const qRes = await api.get(`/dashboards/queries/saved`);
-      const queries = qRes.data as Array<{ id: string; query_config: Record<string, unknown> }>;
+      const queries = qRes.data as Array<{
+        id: string;
+        query_config: Record<string, unknown>;
+      }>;
       const savedQuery = queries.find((q) => q.id === widget.saved_query_id);
       if (!savedQuery) return null;
 
+      // --- translate seeded query_config -> backend EventQueryRequest ---
+      const cfg = savedQuery.query_config || {};
+      // time_range like "7d" / "24h" → start_time/end_time
+      const parseRange = (r: unknown): number => {
+        if (typeof r !== "string") return 14 * 24 * 3600 * 1000;
+        const m = /^(\d+)([dhm])$/.exec(r);
+        if (!m) return 14 * 24 * 3600 * 1000;
+        const n = Number(m[1]);
+        const unit = m[2];
+        const mult =
+          unit === "d" ? 86400_000 : unit === "h" ? 3600_000 : 60_000;
+        return n * mult;
+      };
+      const rangeMs = parseRange(cfg.time_range);
       const endTime = new Date().toISOString();
-      const startTime = new Date(Date.now() - 24 * 3600 * 1000).toISOString();
-      const res = await api.post("/events/query", {
-        ...savedQuery.query_config,
+      const startTime = new Date(Date.now() - rangeMs).toISOString();
+
+      // group_by: "day"/"hour" → time_bucket; otherwise it's a property → keep
+      const gb = cfg.group_by as string | undefined;
+      const timeBucketMap: Record<string, string> = {
+        minute: "1m",
+        hour: "1h",
+        day: "1d",
+        week: "1w",
+      };
+      const isTimeGroup = gb && gb in timeBucketMap;
+      const time_bucket = isTimeGroup ? timeBucketMap[gb!] : "1d";
+      const group_by = isTimeGroup ? undefined : gb;
+
+      // filters: backend wants dict, seed uses []
+      const rawFilters = cfg.filters;
+      const filters =
+        rawFilters && !Array.isArray(rawFilters) &&
+        typeof rawFilters === "object"
+          ? rawFilters
+          : {};
+
+      const eventName = cfg.event_name as string | undefined;
+      const body: Record<string, unknown> = {
         start_time: startTime,
         end_time: endTime,
-      });
-      return res.data as { data: Array<{ bucket: string; value: number }>; total: number };
+        aggregation: (cfg.aggregation as string) || "count",
+        time_bucket,
+        filters,
+      };
+      if (eventName && eventName !== "*") body.event_name = eventName;
+      if (group_by) body.group_by = group_by;
+      if (cfg.aggregation_field)
+        body.property_name = cfg.aggregation_field as string;
+
+      const res = await api.post("/events/query", body);
+      return res.data as {
+        data: Array<{ bucket: string; value: number }>;
+        total: number;
+      };
     },
     enabled: !!widget.saved_query_id,
     refetchInterval: 30000,
