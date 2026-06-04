@@ -2,6 +2,19 @@
 
 A production-grade SaaS analytics platform built with **FastAPI** (Python 3.11+) and **Next.js 14** (TypeScript). Think a lightweight Mixpanel/Metabase.
 
+## Live Demo
+
+| Surface       | URL                                                                                            |
+| ------------- | ---------------------------------------------------------------------------------------------- |
+| Frontend      | https://wexaai.vercel.app                                                                      |
+| API           | https://wexaai-api.onrender.com                                                                |
+| API Docs      | https://wexaai-api.onrender.com/api/docs                                                       |
+| Sample Board  | https://wexaai.vercel.app/dashboards/0f8b1816-4aca-4ff3-937d-425f1b77b265                      |
+
+**Demo login** — `test@wexaai.com` / `TestPass123!`
+
+> The backend is hosted on Render's free tier; the first request after ~15 min of idle takes ~30s to wake (cold start). Subsequent requests are fast.
+
 ## Architecture Overview
 
 ```
