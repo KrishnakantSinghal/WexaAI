@@ -249,7 +249,7 @@ export default function DashboardDetailPage() {
           <p className="text-sm">Add widgets to start visualizing your data</p>
         </div>
       ) : (
-        <div className="grid grid-cols-12 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-4">
           {dashboard.widgets.map((widget) => {
             const pos = widget.position as {
               x: number;
@@ -257,14 +257,32 @@ export default function DashboardDetailPage() {
               w: number;
               h: number;
             };
+            const spanW = Math.min(Math.max(pos.w || 6, 1), 12);
+            // Static class map so Tailwind picks these up during build.
+            const lgColSpan = {
+              1: "lg:col-span-1",
+              2: "lg:col-span-2",
+              3: "lg:col-span-3",
+              4: "lg:col-span-4",
+              5: "lg:col-span-5",
+              6: "lg:col-span-6",
+              7: "lg:col-span-7",
+              8: "lg:col-span-8",
+              9: "lg:col-span-9",
+              10: "lg:col-span-10",
+              11: "lg:col-span-11",
+              12: "lg:col-span-12",
+            }[spanW];
+            const heightPx = Math.max((pos.h || 4) * 80, 240);
             return (
               <div
                 key={widget.id}
                 className={cn(
                   "bg-white rounded-xl border border-gray-200 p-4",
-                  `col-span-${Math.min(pos.w, 12)}`
+                  "col-span-1 sm:col-span-2",
+                  lgColSpan
                 )}
-                style={{ minHeight: `${pos.h * 80}px` }}
+                style={{ height: `${heightPx}px` }}
               >
                 <p className="text-sm font-medium text-gray-700 mb-3">
                   {widget.title}
